@@ -38,7 +38,7 @@ REGULUS = SkyCoord(ra='10h08m22.3s', dec='+11d58m02s', frame='icrs')
 DATE_AUG = datetime(2026, 8, 22, 17, 3, 0, tzinfo=timezone.utc)
 DATE_OCT = datetime(2026, 10, 7, 2, 41, 0, tzinfo=timezone.utc)
 
-LOG_FILE = "DarkSwan.csv"
+LOG_FILE = f"DarkSwan_{datetime.now().strftime('%Y-%m-%d')}.csv"
 ENV_LOG_FILE = "giza_environment_log.csv"
 GUARDIAN_CONFIG_FILE = "guardian_config_snapshot.json"
 FS = 100
@@ -279,7 +279,7 @@ class AstroCache:
     """Goal 1: Astro-layer stability with caching and staleness detection."""
     def __init__(self):
         self.last_valid = {
-            "reg_az": 0, "ven_az": 0, "jup_az": 0, "moon_az": 0, "sun_az": 0, "moon_phase": 0.0, "grav_load": 25.0
+            "reg_az": 0, "ven_az": 0, "jup_az": 0, "moon_az": 0, "sun_az": 0, "grav_load": 25.0
         }
         self.last_update = datetime.now(timezone.utc)
         self.astro_stale = False
@@ -312,7 +312,7 @@ def get_space_metrics(target_time=None):
                                          If None, uses current time - 900s (T-15min sync).
     
     Returns:
-        dict: Contains reg_az, ven_az, jup_az, grav_load
+        dict: Contains reg_az, ven_az, jup_az, moon_az, sun_az, grav_load
     """
     try:
         # SYNC T-15min (900s) - Use target_time if provided, otherwise calculate from now
@@ -332,29 +332,52 @@ def get_space_metrics(target_time=None):
         jupiter = get_body('jupiter', now).transform_to(altaz_frame)
 
         # --- SYZYGY 2.0 GRAVITY MODEL ---
-        # Liczymy nacisk grawitacyjny (Słońce + Księżyc)
-        # Składowa pionowa nacisku: sin(alt)
-        sun_press = np.sin(np.radians(max(0, sun.alt.deg))) * 40.0
-        moon_press = np.sin(np.radians(max(0, moon.alt.deg))) * 60.0 # Księżyc silniej szarpie pływy
-        g_load = (
-            sun_press +
-            moon_press +
-            (np.sin(np.radians(reg.az.deg)) * 15.0) +
-            25.0
-        )
+        # Stabilized astronomical calculations with explicit float conversion
 
-        g_load = max(0.0, min(100.0, g_load))
+        try:
+            sun_alt = float(sun.alt.deg)
+        except Exception:
+            sun_alt = 0.0
 
-        moon_phase = float(((moon.separation(sun).deg) / 180.0) * 100.0)
+        try:
+            moon_alt = float(moon.alt.deg)
+        except Exception:
+            moon_alt = 0.0
+
+        try:
+            reg_az = float(reg.az.deg)
+        except Exception:
+            reg_az = 0.0
+
+        try:
+            sun_az = float(sun.az.deg)
+        except Exception:
+            sun_az = 0.0
+
+        try:
+            moon_az = float(moon.az.deg)
+        except Exception:
+            moon_az = 0.0
+
+        # Vertical tidal/gravity contribution
+        sun_press = np.sin(np.radians(max(0.0, sun_alt))) * 40.0
+        moon_press = np.sin(np.radians(max(0.0, moon_alt))) * 60.0
+
+        # Harmonic regulus component
+        regulus_component = np.sin(np.radians(reg_az)) * 15.0
+
+        g_load = 25.0 + sun_press + moon_press + regulus_component
+
+        # Clamp to safe HUD range
+        g_load = float(max(0.0, min(100.0, g_load)))
 
         new_metrics = {
-            "reg_az": float(reg.az.deg),
+            "reg_az": reg_az,
             "ven_az": float(venus.az.deg),
             "jup_az": float(jupiter.az.deg),
-            "moon_az": float(moon.az.deg),
-            "sun_az": float(sun.az.deg),
-            "moon_phase": moon_phase,
-            "grav_load": float(g_load)
+            "moon_az": moon_az,
+            "sun_az": sun_az,
+            "grav_load": g_load
         }
         astro_cache.update(new_metrics)
         return new_metrics
@@ -448,7 +471,7 @@ class GizaSniperStreamer:
 
 
 def format_elapsed_harmonic(lock_start_timestamp):
-    """LOCK duration formatter with seconds precision."""
+    """Format LOCK DURATION with seconds precision."""
     if lock_start_timestamp is None:
         return "0S"
 
@@ -472,8 +495,16 @@ def format_elapsed_harmonic(lock_start_timestamp):
         return f"{hours}H {minutes:02d}M"
 
     except Exception as e:
-        print(f"[LOCK FORMAT ERROR] {e}")
+        print(f"[HARMONIC FORMAT ERROR] {e}")
         return "0S"
+    
+    try:
+        now = datetime.now(timezone.utc)
+        elapsed_seconds = (now - lock_start_timestamp).total_seconds()
+        
+        # Reject impossible elapsed times
+        if elapsed_seconds < 0 or elapsed_seconds > 86400:
+            return "0M"
         
         elapsed_minutes = int(elapsed_seconds / 60)
         
@@ -907,7 +938,7 @@ def update_mission_control(n):
 
     with open(LOG_FILE, "a") as f:
         f.write(f"{ts},{sigma:.4f},{peak_hz:.2f},{tec:.2f},{align:.1f},{ent:.4f},{grav_load:.2f},"
-                f"{h_conf:.1f},{s_metrics['reg_az']:.2f},{s_metrics['ven_az']:.2f},{s_metrics['jup_az']:.2f},{tag}\n")
+                f"{h_conf:.1f},{s_metrics['reg_az']:.2f},{s_metrics['ven_az']:.2f},{s_metrics['jup_az']:.2f},{s_metrics['moon_az']:.2f},{s_metrics['sun_az']:.2f},{tag}\n")
 
     f_sigma = go.Figure(go.Scatter(
         y=list(rolling_stats)[-100:], mode='lines',
@@ -1048,9 +1079,9 @@ def update_mission_control(n):
         html.Span(f"VENUS: {s_metrics['ven_az']:.1f}° ", style={"color": "#E1ADFF", "marginRight": "15px"}),
         html.Span(f"JUPITER: {s_metrics['jup_az']:.1f}° ", style={"color": "#FFD700", "marginRight": "15px"}),
         html.Span(f"REGULUS: {s_metrics['reg_az']:.1f}° ", style={"color": "#FF4444", "marginRight": "15px"}),
-        html.Span(f"MOON: {s_metrics.get('moon_az', 0.0):.1f}° ", style={"color": "#AAAAFF", "marginRight": "15px"}),
-        html.Span(f"SUN: {s_metrics.get('sun_az', 0.0):.1f}° ", style={"color": "#FFD27F", "marginRight": "15px"}),
-        html.Span(f"PHASE: {s_metrics.get('moon_phase', 0.0):.1f}", style={"color": "#FFFFFF"})
+        html.Span(f"MOON: {s_metrics['moon_az']:.1f}° ", style={"color": "#AAAAFF", "marginRight": "15px"}),
+        html.Span(f"SUN: {s_metrics['sun_az']:.1f}° ", style={"color": "#FFD27F", "marginRight": "15px"}),
+        html.Span("PHASE: 0.0", style={"color": "#00D4FF"})
     ])
     
     # Goal 1: Add ASTRO_STALE indicator if cache is stale
@@ -1085,7 +1116,7 @@ def update_mission_control(n):
 
     # HUD LABELS CLARIFICATION: Renamed "HARMONIC SYNC" → "LOCK DURATION"
     lock_duration = format_elapsed_harmonic(sniper.harmonic_lock_start)
-    lock_duration_txt = lock_duration if is_locked else "0M"
+    lock_duration_txt = lock_duration if is_locked else "0S"
     h_conf_txt = f"{h_conf:.1f}%"
     
     return (
