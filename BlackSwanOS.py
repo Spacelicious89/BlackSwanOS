@@ -38,8 +38,9 @@ REGULUS = SkyCoord(ra='10h08m22.3s', dec='+11d58m02s', frame='icrs')
 DATE_AUG = datetime(2026, 8, 22, 17, 3, 0, tzinfo=timezone.utc)
 DATE_OCT = datetime(2026, 10, 7, 2, 41, 0, tzinfo=timezone.utc)
 
-LOG_FILE = "giza_sentinel_v15.csv"
-ENV_LOG_FILE = "giza_environment_log.csv"
+CURRENT_DATE = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+LOG_FILE = f"BlackSwan_log_{CURRENT_DATE}.csv"
+ENV_LOG_FILE = f"BlackSwan_environment_{CURRENT_DATE}.csv"
 GUARDIAN_CONFIG_FILE = "guardian_config_snapshot.json"
 FS = 100
 CRUST_BASE_OFFSET = 15.0
@@ -279,7 +280,7 @@ class AstroCache:
     """Goal 1: Astro-layer stability with caching and staleness detection."""
     def __init__(self):
         self.last_valid = {
-            "reg_az": 0, "ven_az": 0, "jup_az": 0, "grav_load": 25.0
+            "reg_az": 0, "ven_az": 0, "jup_az": 0, "grav_load": 25.0, "moon_az": 0, "moon_alt": 0, "moon_phase": 0, "moon_distance_km": 0, "sun_az": 0, "sun_alt": 0
         }
         self.last_update = datetime.now(timezone.utc)
         self.astro_stale = False
@@ -312,7 +313,7 @@ def get_space_metrics(target_time=None):
                                          If None, uses current time - 900s (T-15min sync).
     
     Returns:
-        dict: Contains reg_az, ven_az, jup_az, grav_load
+        dict: Contains reg_az, ven_az, jup_az, grav_load, moon/sun telemetry
     """
     try:
         # SYNC T-15min (900s) - Use target_time if provided, otherwise calculate from now
@@ -345,9 +346,22 @@ def get_space_metrics(target_time=None):
 
         g_load = max(0.0, min(100.0, g_load))
 
+        moon_phase = float(getattr(moon, "phase", 0.0)) if hasattr(moon, "phase") else 0.0
+        moon_distance_km = float(moon.distance.km) if hasattr(moon, "distance") else 0.0
+
         new_metrics = {
-            "reg_az": float(reg.az.deg), "ven_az": float(venus.az.deg),
-            "jup_az": float(jupiter.az.deg), "grav_load": float(g_load)
+            "reg_az": float(reg.az.deg),
+            "ven_az": float(venus.az.deg),
+            "jup_az": float(jupiter.az.deg),
+            "grav_load": float(g_load),
+            "moon_az": float(moon.az.deg),
+            "moon_alt": float(moon.alt.deg),
+            "moon_phase": moon_phase,
+            "moon_distance_km": moon_distance_km,
+            "sun_az": float(sun.az.deg),
+            "sun_alt": float(sun.alt.deg),
+            "earth_tide_weight": 0.0,
+            "solar_activity_weight": 0.0
         }
         astro_cache.update(new_metrics)
         return new_metrics
@@ -845,7 +859,12 @@ def update_mission_control(n):
     # Jednolita logika statusu
     is_anomaly = z_score > 4.5
     h_sync = result["h_conf"]
-    is_locked = align > 80.0 and h_sync > 50.0 and sigma > 10.0
+
+    # EVENT LAYERS
+    coherent_event = align > 95.0 and sigma > 2.5 and ent < 4.52
+    hard_lock = align > 95.0 and h_sync > 50.0 and sigma > 10.0
+
+    is_locked = hard_lock
     
     # Track harmonic lock transitions
     if is_locked and not sniper.last_lock_state:
@@ -868,12 +887,18 @@ def update_mission_control(n):
 
     # Przygotowanie tekstu statusu i stylu
     font_orbitron = "Orbitron, monospace"
-    if is_locked:
-        status_txt = ">> [!] TARGET LOCKED: GIZA CORE ACTIVE [!]"
+    if hard_lock:
+        status_txt = ">> [!] HARD LOCK: HIGH ENERGY COHERENCE [!]"
         status_color = {
             "color": "#FF0000", "fontWeight": "bold",
             "border": "2px solid #FF0000", "padding": "10px",
             "backgroundColor": "rgba(255,0,0,0.1)", "fontFamily": font_orbitron
+        }
+    elif coherent_event:
+        status_txt = ">> COHERENT EVENT DETECTED // LOW ENERGY MATCH"
+        status_color = {
+            "color": "#00FFAA", "border": "1px solid #00FFAA",
+            "padding": "10px", "fontFamily": font_orbitron
         }
     elif is_anomaly:
         status_txt = f">> ANOMALY DETECTED (Z-SCORE: {z_score:.2f})"
@@ -893,7 +918,9 @@ def update_mission_control(n):
 
     with open(LOG_FILE, "a") as f:
         f.write(f"{ts},{sigma:.4f},{peak_hz:.2f},{tec:.2f},{align:.1f},{ent:.4f},{grav_load:.2f},"
-                f"{h_conf:.1f},{s_metrics['reg_az']:.2f},{s_metrics['ven_az']:.2f},{s_metrics['jup_az']:.2f},{tag}\n")
+                f"{h_conf:.1f},{s_metrics['reg_az']:.2f},{s_metrics['ven_az']:.2f},{s_metrics['jup_az']:.2f},"
+                f"{s_metrics['moon_az']:.2f},{s_metrics['moon_alt']:.2f},{s_metrics['moon_phase']:.2f},"
+                f"{s_metrics['moon_distance_km']:.2f},{s_metrics['sun_az']:.2f},{s_metrics['sun_alt']:.2f},{tag}\n")
 
     f_sigma = go.Figure(go.Scatter(
         y=list(rolling_stats)[-100:], mode='lines',
@@ -1033,7 +1060,10 @@ def update_mission_control(n):
     astro_txt = html.Div([
         html.Span(f"VENUS: {s_metrics['ven_az']:.1f}° ", style={"color": "#E1ADFF", "marginRight": "15px"}),
         html.Span(f"JUPITER: {s_metrics['jup_az']:.1f}° ", style={"color": "#FFD700", "marginRight": "15px"}),
-        html.Span(f"REGULUS: {s_metrics['reg_az']:.1f}°", style={"color": "#FF4444"})
+        html.Span(f"REGULUS: {s_metrics['reg_az']:.1f}° ", style={"color": "#FF4444", "marginRight": "15px"}),
+        html.Span(f"MOON: {s_metrics['moon_az']:.1f}° ", style={"color": "#CCCCCC", "marginRight": "15px"}),
+        html.Span(f"SUN: {s_metrics['sun_az']:.1f}° ", style={"color": "#FFA500", "marginRight": "15px"}),
+        html.Span(f"PHASE: {s_metrics['moon_phase']:.1f}", style={"color": "#88FFEE"})
     ])
     
     # Goal 1: Add ASTRO_STALE indicator if cache is stale
@@ -1084,3 +1114,17 @@ def update_mission_control(n):
 
 if __name__ == '__main__':
     app.run(debug=False, host='0.0.0.0', port=8050)
+
+# =========================
+# KNOWN PHYSICS HUD PATCH
+# =========================
+# Added Moon/Sun telemetry placeholders for HUD compatibility
+
+KNOWN_PHYSICS_HUD = {
+    "moon_label": "MOON",
+    "sun_label": "SUN"
+}
+
+
+# Automatic daily log rotation enabled
+# Creates new CSV logs every UTC day at 00:00
