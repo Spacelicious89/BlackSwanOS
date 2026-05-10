@@ -762,9 +762,13 @@ app.layout = html.Div(id="main-container", style={
                     "background": "#0D0E12", "padding": "15px", "border": "1px solid #222"
                 }, children=[
                     html.Div([
-                        html.Span("HARMONIC SYNC: ", style={"color": "#888"}),
-                        html.Span(id="sync-val", style={"color": "#00FF41", "fontFamily": "Orbitron, monospace"})
+                        html.Span("LOCK DURATION: ", style={"color": "#888"}),
+                        html.Span(id="lock-duration-val", style={"color": "#00FF41", "fontFamily": "Orbitron, monospace"})
                     ]),
+                    html.Div([
+                        html.Span("H-CONF: ", style={"color": "#888"}),
+                        html.Span(id="h-conf-val", style={"color": "#FFB302", "fontFamily": "Orbitron, monospace"})
+                    ], style={"marginTop": "5px"}),
                     html.Div([
                         html.Span("SIGNAL ORDER: ", style={"color": "#888"}),
                         html.Span(id="entropy-val", style={"color": "#FFB302", "fontFamily": "Orbitron, monospace"})
@@ -791,12 +795,13 @@ app.layout = html.Div(id="main-container", style={
     [Output("sigma-plot", "figure"), Output("spec-plot", "figure"),
      Output("radar-map", "figure"), Output("gauge-sigma", "figure"),
      Output("status-msg", "children"), Output("status-msg", "style"),
-     Output("alignment-val", "children"), Output("sync-val", "children"),
-     Output("entropy-val", "children"), Output("tec-val", "children"),
-     Output("gravity-val", "children"), Output("regulus-hud", "children"),
-     Output("cd-aug", "children"), Output("cd-oct", "children"),
-     Output("main-container", "style"), Output("log-display", "children"),
-     Output("spectral-bars", "children"), Output("sync-indicator", "children")],
+     Output("alignment-val", "children"), Output("lock-duration-val", "children"),
+     Output("h-conf-val", "children"), Output("entropy-val", "children"),
+     Output("tec-val", "children"), Output("gravity-val", "children"),
+     Output("regulus-hud", "children"), Output("cd-aug", "children"),
+     Output("cd-oct", "children"), Output("main-container", "style"),
+     Output("log-display", "children"), Output("spectral-bars", "children"),
+     Output("sync-indicator", "children")],
     [Input("heartbeat", "n_intervals")]
 )
 def update_mission_control(n):
@@ -1061,14 +1066,15 @@ def update_mission_control(n):
         })
     ]
 
-    # HUD HARMONIC SYNC FIX: Use format_elapsed_harmonic for safe time display
-    harmonic_elapsed = format_elapsed_harmonic(sniper.harmonic_lock_start)
-    sync_txt = harmonic_elapsed if is_locked else f"{h_conf:.1f}%"
+    # HUD LABELS CLARIFICATION: Renamed "HARMONIC SYNC" → "LOCK DURATION"
+    lock_duration = format_elapsed_harmonic(sniper.harmonic_lock_start)
+    lock_duration_txt = lock_duration if is_locked else "0M"
+    h_conf_txt = f"{h_conf:.1f}%"
     
     return (
         f_sigma, f_spec, f_map, g_sigma,
         status_txt, status_color,
-        f"{align:.1f}%", sync_txt, f"{ent:.3f}",
+        f"{align:.1f}%", lock_duration_txt, h_conf_txt, f"{ent:.3f}",
         f"{tec:.1f}", f"{grav_load:.1f}",
         astro_txt,
         cd(DATE_AUG), cd(DATE_OCT),
