@@ -374,6 +374,9 @@ class GizaSniperStreamer:
             "harm_score": 0.0, "energy_score": 0.0,
             "persistence_score": 0.0, "cluster_score": 0.0, "noise_floor": 1.0
         }
+        # HUD HARMONIC SYNC: Track lock state for elapsed time display
+        self.harmonic_lock_start = None
+        self.last_lock_state = False
 
     def tec_worker(self):
         while self.running:
@@ -435,6 +438,41 @@ class GizaSniperStreamer:
             except Exception as e:
                 print(f"[STREAMER ERROR] {e}")
             time.sleep(1)
+
+
+def format_elapsed_harmonic(lock_start_timestamp):
+    """
+    Format harmonic lock elapsed time safely.
+    
+    Args:
+        lock_start_timestamp: datetime or None
+    
+    Returns:
+        str: Formatted time "XM" (under 60m) or "XH YM" (over 60m), or "0M" if invalid
+    """
+    if lock_start_timestamp is None:
+        return "0M"
+    
+    try:
+        now = datetime.now(timezone.utc)
+        elapsed_seconds = (now - lock_start_timestamp).total_seconds()
+        
+        # Reject impossible elapsed times
+        if elapsed_seconds < 0 or elapsed_seconds > 86400:
+            return "0M"
+        
+        elapsed_minutes = int(elapsed_seconds / 60)
+        
+        if elapsed_minutes < 60:
+            return f"{elapsed_minutes}M"
+        else:
+            hours = elapsed_minutes // 60
+            minutes = elapsed_minutes % 60
+            return f"{hours}H {minutes}M"
+    
+    except Exception as e:
+        print(f"[HARMONIC FORMAT ERROR] {e}")
+        return "0M"
 
 
 def calculate_giza_alignment(sigs):
@@ -803,6 +841,16 @@ def update_mission_control(n):
     is_anomaly = z_score > 4.5
     h_sync = result["h_conf"]
     is_locked = align > 80.0 and h_sync > 50.0 and sigma > 10.0
+    
+    # Track harmonic lock transitions
+    if is_locked and not sniper.last_lock_state:
+        # FALSE -> TRUE transition: start tracking elapsed time
+        sniper.harmonic_lock_start = datetime.now(timezone.utc)
+        sniper.last_lock_state = True
+    elif not is_locked and sniper.last_lock_state:
+        # TRUE -> FALSE transition: reset tracking
+        sniper.harmonic_lock_start = None
+        sniper.last_lock_state = False
 
     # Ustalenie koloru tła
     bg_color = "#220000" if is_anomaly else "#08090B"
@@ -1013,7 +1061,9 @@ def update_mission_control(n):
         })
     ]
 
-    sync_txt = f"{cd(DATE_AUG)}" if h_conf > 30 else f"{h_conf:.1f}%"
+    # HUD HARMONIC SYNC FIX: Use format_elapsed_harmonic for safe time display
+    harmonic_elapsed = format_elapsed_harmonic(sniper.harmonic_lock_start)
+    sync_txt = harmonic_elapsed if is_locked else f"{h_conf:.1f}%"
     
     return (
         f_sigma, f_spec, f_map, g_sigma,
