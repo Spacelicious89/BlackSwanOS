@@ -332,23 +332,52 @@ def get_space_metrics(target_time=None):
         jupiter = get_body('jupiter', now).transform_to(altaz_frame)
 
         # --- SYZYGY 2.0 GRAVITY MODEL ---
-        # Liczymy nacisk grawitacyjny (Słońce + Księżyc)
-        # Składowa pionowa nacisku: sin(alt)
-        sun_press = np.sin(np.radians(max(0, sun.alt.deg))) * 40.0
-        moon_press = np.sin(np.radians(max(0, moon.alt.deg))) * 60.0 # Księżyc silniej szarpie pływy
-        g_load = (
-            sun_press +
-            moon_press +
-            (np.sin(np.radians(reg.az.deg)) * 15.0) +
-            25.0
-        )
+        # Stabilized astronomical calculations with explicit float conversion
 
-        g_load = max(0.0, min(100.0, g_load))
+        try:
+            sun_alt = float(sun.alt.deg)
+        except Exception:
+            sun_alt = 0.0
+
+        try:
+            moon_alt = float(moon.alt.deg)
+        except Exception:
+            moon_alt = 0.0
+
+        try:
+            reg_az = float(reg.az.deg)
+        except Exception:
+            reg_az = 0.0
+
+        try:
+            sun_az = float(sun.az.deg)
+        except Exception:
+            sun_az = 0.0
+
+        try:
+            moon_az = float(moon.az.deg)
+        except Exception:
+            moon_az = 0.0
+
+        # Vertical tidal/gravity contribution
+        sun_press = np.sin(np.radians(max(0.0, sun_alt))) * 40.0
+        moon_press = np.sin(np.radians(max(0.0, moon_alt))) * 60.0
+
+        # Harmonic regulus component
+        regulus_component = np.sin(np.radians(reg_az)) * 15.0
+
+        g_load = 25.0 + sun_press + moon_press + regulus_component
+
+        # Clamp to safe HUD range
+        g_load = float(max(0.0, min(100.0, g_load)))
 
         new_metrics = {
-            "reg_az": float(reg.az.deg), "ven_az": float(venus.az.deg),
-            "jup_az": float(jupiter.az.deg), "moon_az": float(moon.az.deg),
-            "sun_az": float(sun.az.deg), "grav_load": float(g_load)
+            "reg_az": reg_az,
+            "ven_az": float(venus.az.deg),
+            "jup_az": float(jupiter.az.deg),
+            "moon_az": moon_az,
+            "sun_az": sun_az,
+            "grav_load": g_load
         }
         astro_cache.update(new_metrics)
         return new_metrics
@@ -699,7 +728,7 @@ app.layout = html.Div(id="main-container", style={
         "borderBottom": "1px solid #222", "paddingBottom": "15px", "marginBottom": "20px"
     }, children=[
         html.Div([
-            html.H1("GIZA_OS // DarkSwan v1.0", style={
+            html.H1("GIZA_OS // SPACE_SENTINEL v15.0", style={
                 "margin": "0", "fontFamily": "Orbitron, monospace",
                 "color": "#FFB302", "fontSize": "20px", "letterSpacing": "2px"
             }),
