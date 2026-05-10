@@ -279,7 +279,7 @@ class AstroCache:
     """Goal 1: Astro-layer stability with caching and staleness detection."""
     def __init__(self):
         self.last_valid = {
-            "reg_az": 0, "ven_az": 0, "jup_az": 0, "grav_load": 25.0
+            "reg_az": 0, "ven_az": 0, "jup_az": 0, "moon_az": 0, "sun_az": 0, "moon_phase": 0.0, "grav_load": 25.0
         }
         self.last_update = datetime.now(timezone.utc)
         self.astro_stale = False
@@ -345,9 +345,16 @@ def get_space_metrics(target_time=None):
 
         g_load = max(0.0, min(100.0, g_load))
 
+        moon_phase = float(((moon.separation(sun).deg) / 180.0) * 100.0)
+
         new_metrics = {
-            "reg_az": float(reg.az.deg), "ven_az": float(venus.az.deg),
-            "jup_az": float(jupiter.az.deg), "grav_load": float(g_load)
+            "reg_az": float(reg.az.deg),
+            "ven_az": float(venus.az.deg),
+            "jup_az": float(jupiter.az.deg),
+            "moon_az": float(moon.az.deg),
+            "sun_az": float(sun.az.deg),
+            "moon_phase": moon_phase,
+            "grav_load": float(g_load)
         }
         astro_cache.update(new_metrics)
         return new_metrics
@@ -441,7 +448,7 @@ class GizaSniperStreamer:
 
 
 def format_elapsed_harmonic(lock_start_timestamp):
-    """Format LOCK DURATION with seconds precision."""
+    """LOCK duration formatter with seconds precision."""
     if lock_start_timestamp is None:
         return "0S"
 
@@ -449,36 +456,24 @@ def format_elapsed_harmonic(lock_start_timestamp):
         now = datetime.now(timezone.utc)
         elapsed_seconds = int((now - lock_start_timestamp).total_seconds())
 
-        # Reject impossible elapsed times
         if elapsed_seconds < 0 or elapsed_seconds > 86400:
             return "0S"
 
-        # Under 60s -> show seconds
         if elapsed_seconds < 60:
             return f"{elapsed_seconds}S"
 
-        # Under 1h -> show minutes + seconds
         if elapsed_seconds < 3600:
             minutes = elapsed_seconds // 60
             seconds = elapsed_seconds % 60
             return f"{minutes}M {seconds:02d}S"
 
-        # 1h+ -> show hours + minutes
         hours = elapsed_seconds // 3600
         minutes = (elapsed_seconds % 3600) // 60
         return f"{hours}H {minutes:02d}M"
 
     except Exception as e:
-        print(f"[HARMONIC FORMAT ERROR] {e}")
+        print(f"[LOCK FORMAT ERROR] {e}")
         return "0S"
-    
-    try:
-        now = datetime.now(timezone.utc)
-        elapsed_seconds = (now - lock_start_timestamp).total_seconds()
-        
-        # Reject impossible elapsed times
-        if elapsed_seconds < 0 or elapsed_seconds > 86400:
-            return "0M"
         
         elapsed_minutes = int(elapsed_seconds / 60)
         
@@ -1052,7 +1047,10 @@ def update_mission_control(n):
     astro_txt = html.Div([
         html.Span(f"VENUS: {s_metrics['ven_az']:.1f}° ", style={"color": "#E1ADFF", "marginRight": "15px"}),
         html.Span(f"JUPITER: {s_metrics['jup_az']:.1f}° ", style={"color": "#FFD700", "marginRight": "15px"}),
-        html.Span(f"REGULUS: {s_metrics['reg_az']:.1f}°", style={"color": "#FF4444"})
+        html.Span(f"REGULUS: {s_metrics['reg_az']:.1f}° ", style={"color": "#FF4444", "marginRight": "15px"}),
+        html.Span(f"MOON: {s_metrics.get('moon_az', 0.0):.1f}° ", style={"color": "#AAAAFF", "marginRight": "15px"}),
+        html.Span(f"SUN: {s_metrics.get('sun_az', 0.0):.1f}° ", style={"color": "#FFD27F", "marginRight": "15px"}),
+        html.Span(f"PHASE: {s_metrics.get('moon_phase', 0.0):.1f}", style={"color": "#FFFFFF"})
     ])
     
     # Goal 1: Add ASTRO_STALE indicator if cache is stale
