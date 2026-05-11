@@ -62,7 +62,7 @@ debug_counter = 0
 # Zmień listę kolumn na tę:
 if not os.path.exists(LOG_FILE):
     cols = ["timestamp", "sigma", "peak_hz", "tec", "alignment", "entropy", "gravity_load", 
-            "h_confidence", "regulus_az", "venus_az", "jupiter_az", "tags"]
+            "h_confidence", "regulus_az", "venus_az", "jupiter_az", "moon_az", "sun_az", "sirius_az", "vega_az", "tags"]
     pd.DataFrame(columns=cols).to_csv(LOG_FILE, index=False)
 
 
@@ -95,7 +95,7 @@ class GuardianEnvironmental:
         Return dict or None if unavailable.
         """
         
-            try:
+        try:
             import psutil
             cpu_temp = None
             try:
@@ -114,28 +114,7 @@ class GuardianEnvironmental:
             ram_info = psutil.virtual_memory()
             ram_usage = ram_info.percent
             
-            
-
-        # CONTROL STARS v16.3 (LOGGING ONLY)
-        try:
-            sirius = SkyCoord.from_name("Sirius")
-            sirius_altaz = sirius.transform_to(
-                AltAz(obstime=sync_time, location=location)
-            )
-            sirius_az = float(sirius_altaz.az.deg)
-        except:
-            sirius_az = 0.0
-
-        try:
-            vega = SkyCoord.from_name("Vega")
-            vega_altaz = vega.transform_to(
-                AltAz(obstime=sync_time, location=location)
-            )
-            vega_az = float(vega_altaz.az.deg)
-        except:
-            vega_az = 0.0
-
-        return {
+            return {
                 "cpu_temp": cpu_temp,
                 "cpu_usage": cpu_usage,
                 "ram_usage": ram_usage
@@ -301,7 +280,7 @@ class AstroCache:
     """Goal 1: Astro-layer stability with caching and staleness detection."""
     def __init__(self):
         self.last_valid = {
-            "reg_az": 0, "ven_az": 0, "jup_az": 0, "moon_az": 0, "sun_az": 0, "grav_load": 25.0
+            "reg_az": 0, "ven_az": 0, "jup_az": 0, "moon_az": 0, "sun_az": 0, "sirius_az": 0, "vega_az": 0, "grav_load": 25.0
         }
         self.last_update = datetime.now(timezone.utc)
         self.astro_stale = False
@@ -334,7 +313,7 @@ def get_space_metrics(target_time=None):
                                          If None, uses current time - 900s (T-15min sync).
     
     Returns:
-        dict: Contains reg_az, ven_az, jup_az, moon_az, sun_az, grav_load
+        dict: Contains reg_az, ven_az, jup_az, moon_az, sun_az, sirius_az, vega_az, grav_load
     """
     try:
         # SYNC T-15min (900s) - Use target_time if provided, otherwise calculate from now
@@ -381,6 +360,25 @@ def get_space_metrics(target_time=None):
         except Exception:
             moon_az = 0.0
 
+        # CONTROL STARS v16.3 (LOGGING ONLY)
+        try:
+            sirius = SkyCoord.from_name("Sirius")
+            sirius_altaz = sirius.transform_to(
+                AltAz(obstime=now, location=GIZA_LOC)
+            )
+            sirius_az = float(sirius_altaz.az.deg)
+        except Exception:
+            sirius_az = 0.0
+
+        try:
+            vega = SkyCoord.from_name("Vega")
+            vega_altaz = vega.transform_to(
+                AltAz(obstime=now, location=GIZA_LOC)
+            )
+            vega_az = float(vega_altaz.az.deg)
+        except Exception:
+            vega_az = 0.0
+
         # Vertical tidal/gravity contribution
         sun_press = np.sin(np.radians(max(0.0, sun_alt))) * 40.0
         moon_press = np.sin(np.radians(max(0.0, moon_alt))) * 60.0
@@ -399,6 +397,8 @@ def get_space_metrics(target_time=None):
             "jup_az": float(jupiter.az.deg),
             "moon_az": moon_az,
             "sun_az": sun_az,
+            "sirius_az": sirius_az,
+            "vega_az": vega_az,
             "grav_load": g_load
         }
         astro_cache.update(new_metrics)
@@ -519,27 +519,6 @@ def format_elapsed_harmonic(lock_start_timestamp):
     except Exception as e:
         print(f"[HARMONIC FORMAT ERROR] {e}")
         return "0S"
-    
-    try:
-        now = datetime.now(timezone.utc)
-        elapsed_seconds = (now - lock_start_timestamp).total_seconds()
-        
-        # Reject impossible elapsed times
-        if elapsed_seconds < 0 or elapsed_seconds > 86400:
-            return "0M"
-        
-        elapsed_minutes = int(elapsed_seconds / 60)
-        
-        if elapsed_minutes < 60:
-            return f"{elapsed_minutes}M"
-        else:
-            hours = elapsed_minutes // 60
-            minutes = elapsed_minutes % 60
-            return f"{hours}H {minutes}M"
-    
-    except Exception as e:
-        print(f"[HARMONIC FORMAT ERROR] {e}")
-        return "0M"
 
 
 def calculate_giza_alignment(sigs):
@@ -960,7 +939,9 @@ def update_mission_control(n):
 
     with open(LOG_FILE, "a") as f:
         f.write(f"{ts},{sigma:.4f},{peak_hz:.2f},{tec:.2f},{align:.1f},{ent:.4f},{grav_load:.2f},"
-                f"{h_conf:.1f},{s_metrics['reg_az']:.2f},{s_metrics['ven_az']:.2f},{s_metrics['jup_az']:.2f},{s_metrics['moon_az']:.2f},{s_metrics['sun_az']:.2f},{tag}\n")
+                f"{h_conf:.1f},{s_metrics['reg_az']:.2f},{s_metrics['ven_az']:.2f},{s_metrics['jup_az']:.2f},"
+                f"{s_metrics['moon_az']:.2f},{s_metrics['sun_az']:.2f},{s_metrics['sirius_az']:.2f},"
+                f"{s_metrics['vega_az']:.2f},{tag}\n")
 
     f_sigma = go.Figure(go.Scatter(
         y=list(rolling_stats)[-100:], mode='lines',
