@@ -94,7 +94,8 @@ class GuardianEnvironmental:
         Get CPU temp, CPU usage, RAM usage.
         Return dict or None if unavailable.
         """
-        try:
+        
+            try:
             import psutil
             cpu_temp = None
             try:
@@ -113,7 +114,28 @@ class GuardianEnvironmental:
             ram_info = psutil.virtual_memory()
             ram_usage = ram_info.percent
             
-            return {
+            
+
+        # CONTROL STARS v16.3 (LOGGING ONLY)
+        try:
+            sirius = SkyCoord.from_name("Sirius")
+            sirius_altaz = sirius.transform_to(
+                AltAz(obstime=sync_time, location=location)
+            )
+            sirius_az = float(sirius_altaz.az.deg)
+        except:
+            sirius_az = 0.0
+
+        try:
+            vega = SkyCoord.from_name("Vega")
+            vega_altaz = vega.transform_to(
+                AltAz(obstime=sync_time, location=location)
+            )
+            vega_az = float(vega_altaz.az.deg)
+        except:
+            vega_az = 0.0
+
+        return {
                 "cpu_temp": cpu_temp,
                 "cpu_usage": cpu_usage,
                 "ram_usage": ram_usage
